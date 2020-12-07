@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <!-- meta http-equiv="origin-trial" content="AoSY6Q4OOuuZVXTqOwJlfk4n77EL0esumtLRHj+9V97JoFfLq4AKsWlza8A8HmxTx1PU7SSzpjWK6F62bwWLPQYAAAB3eyJvcmlnaW4iOiJodHRwczovL3dlYmNvZGVjcy1ibG9ncG9zdC1kZW1vLmdsaXRjaC5tZTo0NDMiLCJmZWF0dXJlIjoiV2ViQ29kZWNzIiwiZXhwaXJ5IjoxNjA1NDc0OTQ4LCJpc1N1YmRvbWFpbiI6dHJ1ZX0=" -->
+  <meta http-equiv="origin-trial" content="AmR2n5JC+SAgnVeguZLITRN3SnlUTntXi4mzRmGEQ5QjyB3+V/TN2AYvJzAMFMtQpNezb/vGhiLqBPxCsrYzywcAAAB3eyJvcmlnaW4iOiJodHRwczovL3dlYmNvZGVjcy1ibG9ncG9zdC1kZW1vLmdsaXRjaC5tZTo0NDMiLCJmZWF0dXJlIjoiV2ViQ29kZWNzIiwiZXhwaXJ5IjoxNjA4MjU2MDU4LCJpc1N1YmRvbWFpbiI6dHJ1ZX0=">
+  <title>WebCodecs API demo: Encoding and Decoding</title>
+  <style>
+    canvas {
+      padding: 3px;
+      background: rgb(0, 0, 0);
+    }
+
+    button {
+      background-color: #555555;
+      border: none;
+      color: white;
+      padding: 15px 32px;
+      width: 150px;
+      text-align: center;
+      display: block;
+      font-size: 16px;
+    }
+  </style>
+</head>
+
+<body>
+  <script src="http://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+  <script>
+    let codec_string = "vp09.00.10.08";
+    let keep_going = true;
+    let encoded_frame_chunk = [];
+    let frame_count = 600;
+    let encoded_frame_count = 0;
+    let renderingMethod = 0; // 0 for rendering to 2D Canvas, 1 for rendering to WebGL Canvas.
+
+    const stats = new Stats();
+    stats.showPanel(0);  // 0: fps, 1: ms, 2: mb, 3+: custom
+
+    function playPause() {
+      keep_going = !keep_going;
+      let btn = document.querySelector("button");
+      if (keep_going) {
+        btn.innerText = "Pause";
+      } else {
+        btn.innerText = "Play";
+      }
+    }
+
+    function delay(time_ms) {
+      return new Promise((resolve) => {
+        setTimeout(resolve, time_ms);
+      });
+    }
+    function startDecodingAndRendering() {
+      var cnv;
+      var ctx;
+      var renderer;
+      var glTempCnv; 
+      var tempCtx;
+      if (renderingMethod === 0) {
+        cnv = document.getElementById("dst");
+        ctx = cnv.getContext("2d", {alpha: false});
+      } else if (renderingMethod === 1) {
+        console.log("Rendering Path WebGL: Not supported yet.");
+      }
+
+      let ready_frames = [];
+      let underflow = true;
+      let time_base = 0;
+
+      function calculateTimeTillNextFrame(timestamp) {
+        if (time_base == 0)
+          time_base = performance.now();
+        let media_time = performance.now() - time_base;
+        return Math.max(0, (timestamp / 1000) - media_time);
+      }
+
+      async function renderFrame() {
+        if (ready_frames.length == 0) {
+          underflow = true;
+          return;
+        }
+        stats.begin();
+        let frame = ready_frames.shift();
+        underflow = false;
+
+        let bitmap = await frame.createImageBitmap();        
+        // Based on the frame's timestamp calculate how much of real time waiting
+        // is needed before showing the next frame.
+        let time_till_next_frame = calculateTimeTillNextFrame(frame.timestamp);
+        await delay(time_till_next_frame);
+        ctx.drawImage(bitmap, 0, 0, cnv.width, cnv.height);        
+
+        // Immediately schedule rendering of the next frame
+        setTimeout(renderFrame, 0);
+        frame.destroy();
+        bitmap.close();
+        stats.end();
+      }
+
+      async function renderFrameWebGL() {
+        if (ready_frames.length == 0) {
+          underflow = true;
+          return;
+        }
+        stats.begin();
+        let frame = ready_frames.shift();
+        underflow = false;
+
+        let bitmap = await frame.createImageBitmap();        
+        // Based on the frame's timestamp calculate how much of real time waiting
+        // is needed before showing the next frame.
+        let time_till_next_frame = calculateTimeTillNextFrame(frame.timestamp);
+        await delay(time_till_next_frame);
+        tempCtx.drawImage(bitmap, 0, 0, cnv.width, cnv.height);   
+        ctx.viewport(0, 0, cnv.width, cnv.height);
+        renderer.render(glTempCnv);
+        //ctx.drawImage(bitmap, 0, 0, dst.width, dst.height);        
+
+        // Immediately schedule rendering of the next frame
+        setTimeout(renderFrameWebGL, 0);
+        frame.destroy();
+        bitmap.close();
+        stats.end();
+      }
+
+      function handleFrame(frame) {
+        ready_frames.push(frame);
+        if (underflow) {
+          underflow = false;
+          if (renderingMethod === 0) {
+              setTimeout(renderFrame, 0);
+          } else if (renderingMethod === 1) {
+              console.log("Rendering Path WebGL : Not supported yet.")
+          }
+        }
+      }
+
+      const init = {
+        output: handleFrame,
+        error: (e) => {
+          console.log(e.message);
+        }
+      };
+
+      const config = {
+        codec: codec_string,
+        codedWidth: cnv.width,
+        codedHeight: cnv.height
+      };
+
+      let decoder = new VideoDecoder(init);
+      decoder.configure(config);
+      return decoder;
+    }
+
+    async function startDrawing(srcWidth, srcHeight, dstWidth, dstHeight) {
+      var cnv = document.createElement('CANVAS');
+      cnv.setAttribute('id', 'src');
+      cnv.setAttribute('width', srcWidth);
+      cnv.setAttribute('height', srcHeight);
+      document.body.appendChild(cnv);
+      var ctx = cnv.getContext('2d', { alpha: false });
+
+      ctx.fillStyle = "white";
+      let width = cnv.width;
+      let height = cnv.height;
+      let cx = width / 2;
+      let cy = height / 2;
+      let r = Math.min(width, height) / 5;
+      let drawOneFrame = function (time) {
+        let angle = Math.PI * 2 * (time / 5000);
+        let scale = 1 + 0.3 * Math.sin(Math.PI * 2 * (time / 7000));
+        ctx.save();
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        ctx.scale(scale, scale);
+
+        ctx.font = '30px Verdana';
+        ctx.fillStyle = 'black';
+        const text = "😊📹📷Hello WebCodecs 🎥🎞️😊";
+        const text2 = "😊📹📷Performance Test 🎥🎞️😊";
+        const size = ctx.measureText(text).width;
+        const size2 = ctx.measureText(text2).width;
+        ctx.fillText(text, -size / 2, 0);
+        ctx.fillText(text2, -size2 / 2, 100);
+        ctx.restore();
+        if (frame_count > 0) {
+            frame_count--;
+            window.requestAnimationFrame(drawOneFrame);
+        } else {
+            var p = cnv.parentNode;
+            p.removeChild(cnv);
+            
+            var dstCanvasWidth = parseInt(dstWidth);
+            var dstCanvasHeight = parseInt(dstHeight);
+            if (dstCanvasWidth === 0 || dstCanvasHeight === 0) {
+              dstCanvasWidth = screen.width; // * window.devicePixelRatio;
+              dstCanvasHeight = screen.height; // * window.devicePixelRatio;
+            }
+
+            var newElement = document.createElement('CANVAS');
+            if (renderingMethod === 0) {
+              newElement.setAttribute('id', 'dst');
+            } else if (renderingMethod === 1) {
+              console.log("Rendering Path WebGL: Not supported yet")
+            }
+            newElement.setAttribute('width', dstCanvasWidth.toString());
+            newElement.setAttribute('height', dstCanvasHeight.toString());
+            p.appendChild(newElement);
+            document.body.appendChild(stats.dom);
+
+            let decoder = startDecodingAndRendering();
+            encoded_frame_count = encoded_frame_chunk.length;
+            let decode_frame_count = 0;
+            function renderEncodeFrame() {
+                if (decode_frame_count > encoded_frame_count) {
+                  decode_frame_count = 0;
+                }
+                let currentFrame = encoded_frame_chunk[decode_frame_count];
+                decoder.decode(currentFrame);
+                decode_frame_count++;
+                window.requestAnimationFrame(renderEncodeFrame);
+            }
+            window.requestAnimationFrame(renderEncodeFrame);
+        }
+      }
+      window.requestAnimationFrame(drawOneFrame);
+    }
+
+    function captureAndEncode(processChunk) {
+      let cnv = document.getElementById("src");
+      let fps = 60;
+      let pending_outputs = 0;
+      let frame_counter = 0;
+      let stream = cnv.captureStream(fps);
+      let vtr = new VideoTrackReader(stream.getVideoTracks()[0]);
+
+      const init = {
+        output: (chunk) => {
+          pending_outputs--;
+          processChunk(chunk);
+        },
+        error: (e) => {
+          console.log(e.message);
+          vtr.stop();
+        }
+      };
+
+      const config = {
+        codec: codec_string,
+        width: cnv.width,
+        height: cnv.height,
+        bitrate: 10e6,
+        framerate: fps,
+      };
+
+      let encoder = new VideoEncoder(init);
+      encoder.configure(config);
+
+      vtr.start((frame) => {
+        if (!keep_going)
+          return;
+        if (pending_outputs > 30) {
+          // Too many frames in flight, encoder is overwhelmed
+          // let's drop this frame.
+          return;
+        }
+        frame_counter++;
+        pending_outputs++;
+        const insert_keyframe = (frame_counter % 150) == 0;
+        encoder.encode(frame, { keyFrame: insert_keyframe });
+      });
+    }
+
+    function startSample() {
+      var sourceCanvasWidth = document.getElementById("srcWidth");
+      var sourceCanvasHeight = document.getElementById("srcHeight");
+      var dstCanvasWidth = document.getElementById("dstWidth");
+      var dstCanvasHeight = document.getElementById("dstHeight");
+      var frameCount = document.getElementById("frameCount");
+      var encodedCodec = document.getElementById("codec");
+      var renderingPath = document.getElementById("renderingPath")
+
+      var srcWidth = sourceCanvasWidth.value;
+      var srcHeight = sourceCanvasHeight.value;
+      var dstWidth = dstCanvasWidth.value; 
+      var dstHeight = dstCanvasHeight.value;
+      frame_count = frameCount.value;
+      codec_string = encodedCodec.value;
+      renderingMethod = parseInt(renderingPath.value);
+
+      document.body.removeChild(sourceCanvasWidth);
+      document.body.removeChild(document.getElementById("srcWidthLabel"));
+      document.body.removeChild(sourceCanvasHeight);
+      document.body.removeChild(document.getElementById("srcHeightLabel"));
+      document.body.removeChild(dstCanvasWidth);
+      document.body.removeChild(document.getElementById("dstWidthLabel"));
+      document.body.removeChild(dstCanvasHeight);
+      document.body.removeChild(document.getElementById("dstHeightLabel"));
+      document.body.removeChild(frameCount);
+      document.body.removeChild(document.getElementById("frameCountLabel"));
+      document.body.removeChild(encodedCodec);
+      document.body.removeChild(document.getElementById("codecLabel"));
+      document.body.removeChild(document.getElementById("start"));
+      document.body.removeChild(renderingPath);
+      document.body.removeChild(document.getElementById("renderingPathLabel"));
+
+
+      startDrawing(srcWidth, srcHeight, dstWidth, dstHeight);
+      captureAndEncode((chunk) => {
+        encoded_frame_chunk.push(chunk);
+      });
+    }
+
+    function main() {
+      if (!("VideoEncoder" in window)) {
+        document.body.innerHTML = "<h1>WebCodecs API is not supported.</h1>";
+        return;
+      }
+
+      var sourceCanvasWidth = document.createElement("input");
+      sourceCanvasWidth.setAttribute("id", "srcWidth");
+      sourceCanvasWidth.setAttribute("name", "srcWidth");
+      sourceCanvasWidth.setAttribute("type", "text");
+      sourceCanvasWidth.setAttribute("size", "10");
+      sourceCanvasWidth.setAttribute("value", "1920");
+      var sourceCanvasWidthLabel = document.createElement("label");
+      sourceCanvasWidthLabel.setAttribute("id", "srcWidthLabel");
+      sourceCanvasWidthLabel.setAttribute("for", "srcWidth");
+      sourceCanvasWidthLabel.innerHTML = 'Source Canvas Width:';
+      document.body.appendChild(sourceCanvasWidthLabel);
+      document.body.appendChild(sourceCanvasWidth);
+
+      var sourceCanvasHeight = document.createElement("input");
+      sourceCanvasHeight.setAttribute("id", "srcHeight");
+      sourceCanvasHeight.setAttribute("name", "srcHeight");
+      sourceCanvasHeight.setAttribute("type", "text");
+      sourceCanvasHeight.setAttribute("size", "10");
+      sourceCanvasHeight.setAttribute("value", "1080");
+      var sourceCanvasHeightLabel = document.createElement("label");
+      sourceCanvasHeightLabel.setAttribute("id", "srcHeightLabel");
+      sourceCanvasHeightLabel.setAttribute("for", "srcHeight");
+      sourceCanvasHeightLabel.innerHTML = 'Source Canvas Height:';
+      document.body.appendChild(sourceCanvasHeightLabel);
+      document.body.appendChild(sourceCanvasHeight);
+
+      var dstCanvasWidth = document.createElement("input");
+      dstCanvasWidth.setAttribute("id", "dstWidth");
+      dstCanvasWidth.setAttribute("name", "dstWidth");
+      dstCanvasWidth.setAttribute("type", "text");
+      dstCanvasWidth.setAttribute("size", "10");
+      dstCanvasWidth.setAttribute("value", "1280");
+      var dstCanvasWidthLabel = document.createElement("label");
+      dstCanvasWidthLabel.setAttribute("id", "dstWidthLabel");
+      dstCanvasWidthLabel.setAttribute("for", "dstWidth");
+      dstCanvasWidthLabel.innerHTML = 'Dst Canvas Width:';
+      document.body.appendChild(dstCanvasWidthLabel);
+      document.body.appendChild(dstCanvasWidth);
+
+      var dstCanvasHeight = document.createElement("input");
+      dstCanvasHeight.setAttribute("id", "dstHeight");
+      dstCanvasHeight.setAttribute("name", "dstHeight");
+      dstCanvasHeight.setAttribute("type", "text");
+      dstCanvasHeight.setAttribute("size", "10");
+      dstCanvasHeight.setAttribute("value", "720");
+      var dstCanvasHeightLabel = document.createElement("label");
+      dstCanvasHeightLabel.setAttribute("id", "dstHeightLabel");
+      dstCanvasHeightLabel.setAttribute("for", "dstHeight");
+      dstCanvasHeightLabel.innerHTML = 'Dst Canvas Height:';
+      document.body.appendChild(dstCanvasHeightLabel);
+      document.body.appendChild(dstCanvasHeight);
+
+      var encodedFrameCount = document.createElement("input");
+      encodedFrameCount.setAttribute("id", "frameCount");
+      encodedFrameCount.setAttribute("name", "frameCount");
+      encodedFrameCount.setAttribute("type", "text");
+      encodedFrameCount.setAttribute("size", "10");
+      encodedFrameCount.setAttribute("value", "600");
+      var encodedFrameCountLabel = document.createElement("label");
+      encodedFrameCountLabel.setAttribute("id", "frameCountLabel");
+      encodedFrameCountLabel.setAttribute("for", "frameCount");
+      encodedFrameCountLabel.innerHTML = 'Encoded Frame Count:';
+      document.body.appendChild(encodedFrameCountLabel);
+      document.body.appendChild(encodedFrameCount);
+
+      var encodedCodec = document.createElement("input");
+      encodedCodec.setAttribute("id", "codec");
+      encodedCodec.setAttribute("name", "codec");
+      encodedCodec.setAttribute("type", "text");
+      encodedCodec.setAttribute("size", "30");
+      encodedCodec.setAttribute("value", "vp09.00.10.08");
+      var encodedCodecLabel = document.createElement("label");
+      encodedCodecLabel.setAttribute("id", "codecLabel");
+      encodedCodecLabel.setAttribute("for", "codec");
+      encodedCodecLabel.innerHTML = 'Encoded Codec:';
+      document.body.appendChild(encodedCodecLabel);
+      document.body.appendChild(encodedCodec);
+      
+      var renderingPath = document.createElement("select");
+      renderingPath.setAttribute("id", "renderingPath");
+      renderingPath.setAttribute("name", "renderingPath");
+
+      var renderTo2DCanvas = document.createElement("option");
+      renderTo2DCanvas.innerHTML = "Render to 2D Canvas";
+      renderTo2DCanvas.setAttribute("value", "0");
+      var renderToWebGL = document.createElement("option");
+      renderToWebGL.innerHTML = "Render to WebGL(Not Supported)";
+      renderToWebGL.setAttribute("value", "1");
+
+      renderingPath.appendChild(renderTo2DCanvas);
+      renderingPath.appendChild(renderToWebGL);
+      renderingPath.setAttribute("value", "0");
+  
+      var renderingPathLabel = document.createElement("label");
+      renderingPathLabel.setAttribute("id", "renderingPathLabel");
+      renderingPathLabel.setAttribute("for", "renderingPath");
+      renderingPathLabel.innerHTML = 'Rendering Method:';
+      document.body.appendChild(renderingPathLabel);
+      document.body.appendChild(renderingPath);
+
+
+      var btn = document.createElement("BUTTON");
+      btn.innerHTML = "Start";
+      btn.setAttribute("id", "start");
+      document.body.appendChild(btn);
+
+      btn.onclick = function() {
+        startSample();
+      };
+    }
+    document.body.onload = main;
+  </script>
+
+</body>
+
+</html>
