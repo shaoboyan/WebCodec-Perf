@@ -4,7 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <!-- meta http-equiv="origin-trial" content="AoSY6Q4OOuuZVXTqOwJlfk4n77EL0esumtLRHj+9V97JoFfLq4AKsWlza8A8HmxTx1PU7SSzpjWK6F62bwWLPQYAAAB3eyJvcmlnaW4iOiJodHRwczovL3dlYmNvZGVjcy1ibG9ncG9zdC1kZW1vLmdsaXRjaC5tZTo0NDMiLCJmZWF0dXJlIjoiV2ViQ29kZWNzIiwiZXhwaXJ5IjoxNjA1NDc0OTQ4LCJpc1N1YmRvbWFpbiI6dHJ1ZX0=" -->
-  <meta http-equiv="origin-trial" content="AmR2n5JC+SAgnVeguZLITRN3SnlUTntXi4mzRmGEQ5QjyB3+V/TN2AYvJzAMFMtQpNezb/vGhiLqBPxCsrYzywcAAAB3eyJvcmlnaW4iOiJodHRwczovL3dlYmNvZGVjcy1ibG9ncG9zdC1kZW1vLmdsaXRjaC5tZTo0NDMiLCJmZWF0dXJlIjoiV2ViQ29kZWNzIiwiZXhwaXJ5IjoxNjA4MjU2MDU4LCJpc1N1YmRvbWFpbiI6dHJ1ZX0=">
+  <meta http-equiv="origin-trial"
+    content="AmR2n5JC+SAgnVeguZLITRN3SnlUTntXi4mzRmGEQ5QjyB3+V/TN2AYvJzAMFMtQpNezb/vGhiLqBPxCsrYzywcAAAB3eyJvcmlnaW4iOiJodHRwczovL3dlYmNvZGVjcy1ibG9ncG9zdC1kZW1vLmdsaXRjaC5tZTo0NDMiLCJmZWF0dXJlIjoiV2ViQ29kZWNzIiwiZXhwaXJ5IjoxNjA4MjU2MDU4LCJpc1N1YmRvbWFpbiI6dHJ1ZX0=">
   <title>WebCodecs API demo: Encoding and Decoding</title>
   <style>
     canvas {
@@ -27,6 +28,8 @@
 
 <body>
   <script src="http://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+  <script
+    src="https://jchen10.github.io/WebGL/extensions/proposals/WEBGL_webcodecs_video_frame/webgl_webcodecs_video_frame.js"></script>
   <script>
     let codec_string = "vp09.00.10.08";
     let keep_going = true;
@@ -57,13 +60,15 @@
       var cnv;
       var ctx;
       var renderer;
-      var glTempCnv; 
+      var glTempCnv;
       var tempCtx;
+      var webglRenderer;
       if (renderingMethod === 0) {
         cnv = document.getElementById("dst");
-        ctx = cnv.getContext("2d", {alpha: false});
+        ctx = cnv.getContext("2d", { alpha: false });
       } else if (renderingMethod === 1) {
-        console.log("Rendering Path WebGL: Not supported yet.");
+        cnv = document.getElementById("dst");
+        webglRenderer = requestWebGLVideoFrameHandler(cnv, stats);
       }
 
       let ready_frames = [];
@@ -86,12 +91,12 @@
         let frame = ready_frames.shift();
         underflow = false;
 
-        let bitmap = await frame.createImageBitmap();        
+        let bitmap = await frame.createImageBitmap();
         // Based on the frame's timestamp calculate how much of real time waiting
         // is needed before showing the next frame.
         let time_till_next_frame = calculateTimeTillNextFrame(frame.timestamp);
         await delay(time_till_next_frame);
-        ctx.drawImage(bitmap, 0, 0, cnv.width, cnv.height);        
+        ctx.drawImage(bitmap, 0, 0, cnv.width, cnv.height);
 
         // Immediately schedule rendering of the next frame
         setTimeout(renderFrame, 0);
@@ -105,25 +110,9 @@
           underflow = true;
           return;
         }
-        stats.begin();
         let frame = ready_frames.shift();
-        underflow = false;
-
-        let bitmap = await frame.createImageBitmap();        
-        // Based on the frame's timestamp calculate how much of real time waiting
-        // is needed before showing the next frame.
-        let time_till_next_frame = calculateTimeTillNextFrame(frame.timestamp);
-        await delay(time_till_next_frame);
-        tempCtx.drawImage(bitmap, 0, 0, cnv.width, cnv.height);   
-        ctx.viewport(0, 0, cnv.width, cnv.height);
-        renderer.render(glTempCnv);
-        //ctx.drawImage(bitmap, 0, 0, dst.width, dst.height);        
-
-        // Immediately schedule rendering of the next frame
+        webglRenderer(frame);
         setTimeout(renderFrameWebGL, 0);
-        frame.destroy();
-        bitmap.close();
-        stats.end();
       }
 
       function handleFrame(frame) {
@@ -131,9 +120,9 @@
         if (underflow) {
           underflow = false;
           if (renderingMethod === 0) {
-              setTimeout(renderFrame, 0);
+            setTimeout(renderFrame, 0);
           } else if (renderingMethod === 1) {
-              console.log("Rendering Path WebGL : Not supported yet.")
+            setTimeout(renderFrameWebGL, 0);
           }
         }
       }
@@ -190,43 +179,43 @@
         ctx.fillText(text2, -size2 / 2, 100);
         ctx.restore();
         if (frame_count > 0) {
-            frame_count--;
-            window.requestAnimationFrame(drawOneFrame);
+          frame_count--;
+          window.requestAnimationFrame(drawOneFrame);
         } else {
-            var p = cnv.parentNode;
-            p.removeChild(cnv);
-            
-            var dstCanvasWidth = parseInt(dstWidth);
-            var dstCanvasHeight = parseInt(dstHeight);
-            if (dstCanvasWidth === 0 || dstCanvasHeight === 0) {
-              dstCanvasWidth = screen.width; // * window.devicePixelRatio;
-              dstCanvasHeight = screen.height; // * window.devicePixelRatio;
-            }
+          var p = cnv.parentNode;
+          p.removeChild(cnv);
 
-            var newElement = document.createElement('CANVAS');
-            if (renderingMethod === 0) {
-              newElement.setAttribute('id', 'dst');
-            } else if (renderingMethod === 1) {
-              console.log("Rendering Path WebGL: Not supported yet")
-            }
-            newElement.setAttribute('width', dstCanvasWidth.toString());
-            newElement.setAttribute('height', dstCanvasHeight.toString());
-            p.appendChild(newElement);
-            document.body.appendChild(stats.dom);
+          var dstCanvasWidth = parseInt(dstWidth);
+          var dstCanvasHeight = parseInt(dstHeight);
+          if (dstCanvasWidth === 0 || dstCanvasHeight === 0) {
+            dstCanvasWidth = screen.width; // * window.devicePixelRatio;
+            dstCanvasHeight = screen.height; // * window.devicePixelRatio;
+          }
 
-            let decoder = startDecodingAndRendering();
-            encoded_frame_count = encoded_frame_chunk.length;
-            let decode_frame_count = 0;
-            function renderEncodeFrame() {
-                if (decode_frame_count > encoded_frame_count) {
-                  decode_frame_count = 0;
-                }
-                let currentFrame = encoded_frame_chunk[decode_frame_count];
-                decoder.decode(currentFrame);
-                decode_frame_count++;
-                window.requestAnimationFrame(renderEncodeFrame);
+          var newElement = document.createElement('CANVAS');
+          if (renderingMethod === 0) {
+            newElement.setAttribute('id', 'dst');
+          } else if (renderingMethod === 1) {
+            newElement.setAttribute('id', 'dst');
+          }
+          newElement.setAttribute('width', dstCanvasWidth.toString());
+          newElement.setAttribute('height', dstCanvasHeight.toString());
+          p.appendChild(newElement);
+          document.body.appendChild(stats.dom);
+
+          let decoder = startDecodingAndRendering();
+          encoded_frame_count = encoded_frame_chunk.length;
+          let decode_frame_count = 0;
+          function renderEncodeFrame() {
+            if (decode_frame_count > encoded_frame_count) {
+              decode_frame_count = 0;
             }
+            let currentFrame = encoded_frame_chunk[decode_frame_count];
+            decoder.decode(currentFrame);
+            decode_frame_count++;
             window.requestAnimationFrame(renderEncodeFrame);
+          }
+          window.requestAnimationFrame(renderEncodeFrame);
         }
       }
       window.requestAnimationFrame(drawOneFrame);
@@ -288,7 +277,7 @@
 
       var srcWidth = sourceCanvasWidth.value;
       var srcHeight = sourceCanvasHeight.value;
-      var dstWidth = dstCanvasWidth.value; 
+      var dstWidth = dstCanvasWidth.value;
       var dstHeight = dstCanvasHeight.value;
       frame_count = frameCount.value;
       codec_string = encodedCodec.value;
@@ -400,7 +389,7 @@
       encodedCodecLabel.innerHTML = 'Encoded Codec:';
       document.body.appendChild(encodedCodecLabel);
       document.body.appendChild(encodedCodec);
-      
+
       var renderingPath = document.createElement("select");
       renderingPath.setAttribute("id", "renderingPath");
       renderingPath.setAttribute("name", "renderingPath");
@@ -409,13 +398,13 @@
       renderTo2DCanvas.innerHTML = "Render to 2D Canvas";
       renderTo2DCanvas.setAttribute("value", "0");
       var renderToWebGL = document.createElement("option");
-      renderToWebGL.innerHTML = "Render to WebGL(Not Supported)";
+      renderToWebGL.innerHTML = "Render to WebGL";
       renderToWebGL.setAttribute("value", "1");
 
       renderingPath.appendChild(renderTo2DCanvas);
       renderingPath.appendChild(renderToWebGL);
       renderingPath.setAttribute("value", "0");
-  
+
       var renderingPathLabel = document.createElement("label");
       renderingPathLabel.setAttribute("id", "renderingPathLabel");
       renderingPathLabel.setAttribute("for", "renderingPath");
@@ -429,7 +418,7 @@
       btn.setAttribute("id", "start");
       document.body.appendChild(btn);
 
-      btn.onclick = function() {
+      btn.onclick = function () {
         startSample();
       };
     }
