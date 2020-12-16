@@ -4,8 +4,11 @@ Use of this source code is governed by an MIT-style license that can be
 found in the LICENSE.txt file.
 */
 
-function requestWebGLVideoFrameHandler(canvas, stats) {
+function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
     let gl = canvas.getContext('webgl');
+    let useImport = (renderingMethod === 1);
+    let tex2DTexture = gl.createTexture();
+    let stats = stat;
     if (!gl) {
         console.log("<h1>Unable to initialize WebGL. Your browser or machine may not support it.</h1>");
         return null;
@@ -200,7 +203,10 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
     }
 
     function prepareProgram(gl, videoFrame, videoFrameHandle, samplerName) {
-        const newSignature = generateSignature(videoFrameHandle);
+        let newSignature = null;
+        if (useImport) {
+          newSignature = generateSignature(videoFrameHandle);
+        }
         if (program !== null && newSignature === signature)
             return;
         signature = newSignature;
@@ -217,7 +223,9 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
   `;
 
 
-        const fSource =
+        let fSource = "";
+        if (useImport) {
+            fSource = 
             emitRequiredExtension(videoFrameHandle) +
             "precision mediump float;\n" +
             "varying mediump vec2 vTexCoord;\n" +
@@ -230,19 +238,30 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
             emitPremultiplyAlpha(videoFrameHandle, "pixel") +
             "  gl_FragColor = pixel;\n" +
             "}\n";
+        } else {
+            fSource = [
+                "precision mediump float;",
+                "uniform mediump sampler2D diffuse;",
+                "varying vec2 vTexCoord;",
+            
+                "void main() {",
+                "  gl_FragColor = texture2D(diffuse, vTexCoord);",
+                "}",
+              ].join("\n");
+        }
 
         program = initShaderProgram(gl, vSource, fSource);
         initVertexBuffers(gl, program, videoFrame, "aVertexPosition", "aTexCoord");
         const locTexTransform = gl.getUniformLocation(program, "uTexTransform");
         let transform = new Float32Array([0, 0, 1, 1]);
-        if (videoFrameHandle.flipY) {
+        if (useImport && videoFrameHandle.flipY) {
             transform[1] = 1 - transform[1];
             transform[3] = -transform[3];
         }
 
         // TODO: adjust visible rect.
 
-        if (videoFrameHandle.textureInfoArray[0].samplerType === "sampler2DRect") {
+        if (useImport && videoFrameHandle.textureInfoArray[0].samplerType === "sampler2DRect") {
             transform[0] *= videoFrame.codedWidth;
             transform[2] *= videoFrame.codedWidth;
             transform[1] *= videoFrame.codedHeight;
@@ -257,6 +276,9 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
     let time_base = 0;
     let program = null;
     let signature = null;
+    if (!useImport) {
+        prepareProgram(gl, null, null, "", false);
+    }
 
     function delay(time_ms) {
         return new Promise((resolve) => {
@@ -278,7 +300,7 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
         }
         const frame = ready_frames.shift();
         underflow = false;
-
+        stats.begin();
         let videoFrameHandle = null;
         try {
             videoFrameHandle = ext.importVideoFrame(frame);
@@ -286,9 +308,6 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
         catch (error) {
             console.log(error.message);
             return;
-        }
-        if (stats) {
-            stats.begin();
         }
         const samplerName = "aSampler";
         prepareProgram(gl, frame, videoFrameHandle, samplerName);
@@ -306,16 +325,55 @@ function requestWebGLVideoFrameHandler(canvas, stats) {
         setTimeout(renderFrame, 0);
         ext.releaseVideoFrame(videoFrameHandle);
         frame.destroy();
-        if (stats) {
-            stats.end();
+        stats.end();
+    }
+
+    async function renderFrameImageBitmap() {
+        if (ready_frames.length == 0) {
+            underflow = true;
+            return;
         }
+        
+        const frame = ready_frames.shift();
+        underflow = false;
+        stats.begin();
+        const imageBitmap = await frame.createImageBitmap();
+        gl.useProgram(program);
+        initVertexBuffers(gl, program, frame, "aVertexPosition", "aTexCoord");
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tex2DTexture);
+
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imageBitmap);
+
+        //gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.uniform1i(gl.getUniformLocation(program, "diffuse"), 0);
+
+        // Based on the frame's timestamp calculate how much of real time waiting
+        // is needed before showing the next frame.
+        const time_till_next_frame = calculateTimeTillNextFrame(frame.timestamp);
+        await delay(time_till_next_frame);
+
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Immediately schedule rendering of the next frame
+        setTimeout(renderFrameImageBitmap, 0);
+        imageBitmap.close();
+        frame.destroy();
+        stats.end();
     }
 
     function handleFrame(frame) {
         ready_frames.push(frame);
         if (underflow) {
             underflow = false;
-            setTimeout(renderFrame, 0);
+            if (useImport) {
+                setTimeout(renderFrame, 0);
+            } else if (renderingMethod == 2) {
+                setTimeout(renderFrameImageBitmap, 0);
+            }
         }
     }
 

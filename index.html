@@ -34,7 +34,7 @@
     let codec_string = "vp09.00.10.08";
     let keep_going = true;
     let encoded_frame_chunk = [];
-    let frame_count = 600;
+    let frame_count = 60;
     let encoded_frame_count = 0;
     let renderingMethod = 0; // 0 for rendering to 2D Canvas, 1 for rendering to WebGL Canvas.
 
@@ -57,7 +57,7 @@
       });
     }
     function startDecodingAndRendering() {
-      var cnv;
+      var cnv = document.getElementById("dst");
       var ctx;
       var renderer;
       var glTempCnv;
@@ -66,9 +66,8 @@
       if (renderingMethod === 0) {
         cnv = document.getElementById("dst");
         ctx = cnv.getContext("2d", { alpha: false });
-      } else if (renderingMethod === 1) {
-        cnv = document.getElementById("dst");
-        webglRenderer = requestWebGLVideoFrameHandler(cnv, stats);
+      } else {
+        webglRenderer = requestWebGLVideoFrameHandler(cnv, stats, renderingMethod);
       }
 
       let ready_frames = [];
@@ -121,7 +120,7 @@
           underflow = false;
           if (renderingMethod === 0) {
             setTimeout(renderFrame, 0);
-          } else if (renderingMethod === 1) {
+          } else {
             setTimeout(renderFrameWebGL, 0);
           }
         }
@@ -193,11 +192,7 @@
           }
 
           var newElement = document.createElement('CANVAS');
-          if (renderingMethod === 0) {
-            newElement.setAttribute('id', 'dst');
-          } else if (renderingMethod === 1) {
-            newElement.setAttribute('id', 'dst');
-          }
+          newElement.setAttribute('id', 'dst');
           newElement.setAttribute('width', dstCanvasWidth.toString());
           newElement.setAttribute('height', dstCanvasHeight.toString());
           p.appendChild(newElement);
@@ -369,7 +364,7 @@
       encodedFrameCount.setAttribute("name", "frameCount");
       encodedFrameCount.setAttribute("type", "text");
       encodedFrameCount.setAttribute("size", "10");
-      encodedFrameCount.setAttribute("value", "600");
+      encodedFrameCount.setAttribute("value", "60");
       var encodedFrameCountLabel = document.createElement("label");
       encodedFrameCountLabel.setAttribute("id", "frameCountLabel");
       encodedFrameCountLabel.setAttribute("for", "frameCount");
@@ -397,12 +392,16 @@
       var renderTo2DCanvas = document.createElement("option");
       renderTo2DCanvas.innerHTML = "Render to 2D Canvas";
       renderTo2DCanvas.setAttribute("value", "0");
-      var renderToWebGL = document.createElement("option");
-      renderToWebGL.innerHTML = "Render to WebGL";
-      renderToWebGL.setAttribute("value", "1");
+      var WebGLImporting = document.createElement("option");
+      WebGLImporting.innerHTML = "WebGL: Import (extension)";
+      WebGLImporting.setAttribute("value", "1");
+      var WebGLTexImage = document.createElement("option");
+      WebGLTexImage.innerHTML = "WebGL: TexImage (ImageBitmap)";
+      WebGLTexImage.setAttribute("value", "2");
 
       renderingPath.appendChild(renderTo2DCanvas);
-      renderingPath.appendChild(renderToWebGL);
+      renderingPath.appendChild(WebGLImporting);
+      renderingPath.appendChild(WebGLTexImage);
       renderingPath.setAttribute("value", "0");
 
       var renderingPathLabel = document.createElement("label");
