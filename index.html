@@ -30,6 +30,8 @@
   <script src="https://mrdoob.github.io/stats.js/build/stats.min.js"></script>
   <script
     src="webgl_webcodecs_video_frame.js"></script>
+  <script
+    src="webgpu_webcodecs_video_frame .js"></script>
   <script>
     let codec_string = "vp09.00.10.08";
     let keep_going = true;
@@ -63,10 +65,11 @@
       var glTempCnv;
       var tempCtx;
       var webglRenderer;
+      var webgpuRenderer = null;
       if (renderingMethod === 0) {
         cnv = document.getElementById("dst");
         ctx = cnv.getContext("2d", { alpha: false });
-      } else {
+      } else if (renderingMethod === 1 || renderingMethod === 2) {
         webglRenderer = requestWebGLVideoFrameHandler(cnv, stats, renderingMethod);
       }
 
@@ -114,14 +117,29 @@
         setTimeout(renderFrameWebGL, 0);
       }
 
+      async function renderFrameWebGPU() {
+        if (ready_frames.length == 0) {
+          underflow = true;
+          return;
+        }
+        let frame = ready_frames.shift();
+        if (webgpuRenderer === null) {
+          webgpuRenderer = await requestWebGPUVideoFrameHandler(cnv, stats, renderingMethod);
+        }
+        webgpuRenderer(frame);
+        setTimeout(renderFrameWebGPU, 0);
+      }
+
       function handleFrame(frame) {
         ready_frames.push(frame);
         if (underflow) {
           underflow = false;
           if (renderingMethod === 0) {
             setTimeout(renderFrame, 0);
-          } else {
+          } else if (renderingMethod === 1 || renderingMethod === 2) {
             setTimeout(renderFrameWebGL, 0);
+          } else {
+            setTimeout(renderFrameWebGPU, 0);
           }
         }
       }
@@ -398,10 +416,14 @@
       var WebGLTexImage = document.createElement("option");
       WebGLTexImage.innerHTML = "WebGL: TexImage (ImageBitmap)";
       WebGLTexImage.setAttribute("value", "2");
+      var WebGPUTexImage = document.createElement("option");
+      WebGPUTexImage.innerHTML = "WebGPU: CopyImageBitmapToTexture";
+      WebGPUTexImage.setAttribute("value", "3");
 
       renderingPath.appendChild(renderTo2DCanvas);
       renderingPath.appendChild(WebGLImporting);
       renderingPath.appendChild(WebGLTexImage);
+      renderingPath.appendChild(WebGPUTexImage);
       renderingPath.setAttribute("value", "0");
 
       var renderingPathLabel = document.createElement("label");

@@ -272,7 +272,6 @@ function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
     }
 
     let ready_frames = [];
-    let underflow = true;
     let time_base = 0;
     let program = null;
     let signature = null;
@@ -295,11 +294,9 @@ function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
 
     async function renderFrame() {
         if (ready_frames.length == 0) {
-            underflow = true;
             return;
         }
         const frame = ready_frames.shift();
-        underflow = false;
         stats.begin();
         let videoFrameHandle = null;
         try {
@@ -322,7 +319,7 @@ function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // Immediately schedule rendering of the next frame
-        setTimeout(renderFrame, 0);
+        //setTimeout(renderFrame, 0);
         ext.releaseVideoFrame(videoFrameHandle);
         frame.destroy();
         stats.end();
@@ -330,12 +327,10 @@ function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
 
     async function renderFrameImageBitmap() {
         if (ready_frames.length == 0) {
-            underflow = true;
             return;
         }
         
         const frame = ready_frames.shift();
-        underflow = false;
         stats.begin();
         const imageBitmap = await frame.createImageBitmap();
         gl.useProgram(program);
@@ -368,7 +363,7 @@ function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
         // Immediately schedule rendering of the next frame
-        setTimeout(renderFrameImageBitmap, 0);
+        //setTimeout(renderFrameImageBitmap, 0);
         imageBitmap.close();
         frame.destroy();
         stats.end();
@@ -376,13 +371,10 @@ function requestWebGLVideoFrameHandler(canvas, stat, renderingMethod) {
 
     function handleFrame(frame) {
         ready_frames.push(frame);
-        if (underflow) {
-            underflow = false;
-            if (useImport) {
-                setTimeout(renderFrame, 0);
-            } else if (renderingMethod == 2) {
-                setTimeout(renderFrameImageBitmap, 0);
-            }
+        if (useImport) {
+            setTimeout(renderFrame, 0);
+        } else if (renderingMethod == 2) {
+            setTimeout(renderFrameImageBitmap, 0);
         }
     }
 
