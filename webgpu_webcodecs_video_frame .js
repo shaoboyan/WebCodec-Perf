@@ -4,28 +4,6 @@ Use of this source code is governed by an MIT-style license that can be
 found in the LICENSE.txt file.
 */
 
-const glslShaders = {
-    vertex: `#version 450
-  layout(location = 0) in vec3 position;
-  layout(location = 1) in vec2 uv;
-  layout(location = 0) out vec2 fragUV;
-  void main() {
-    gl_Position = vec4(position, 1.0);
-    fragUV = uv;
-  }
-  `,
-  
-    fragment: `#version 450
-  layout(set = 0, binding = 0) uniform sampler mySampler;
-  layout(set = 0, binding = 1) uniform texture2D myTexture;
-  layout(location = 0) in vec2 fragUV;
-  layout(location = 0) out vec4 outColor;
-  void main() {
-    outColor = texture(sampler2D(myTexture, mySampler), fragUV);
-  }
-  `,
-  };
-  
 const wgslShaders = {
     vertex: `#version 450
   [[location(0)]] var<in> position : vec3<f32>;
@@ -53,6 +31,46 @@ const wgslShaders = {
   
   };
 
+// No float literal scientific notation support in wgsl.
+const wgslImportShaders = {
+    vertex: `#version 450
+  [[location(0)]] var<in> position : vec3<f32>;
+  [[location(1)]] var<in> uv : vec2<f32>;
+  [[location(0)]] var<out> fragUV : vec2<f32>;
+  [[builtin(position)]] var<out> Position : vec4<f32>;
+  [[stage(vertex)]]
+  fn main() -> void {
+     Position = vec4<f32>(position, 1.0);
+     fragUV = uv;
+  }
+  `,
+  
+    fragment: `
+  [[binding(0), set(0)]] var<uniform_constant> mySamplerPlane0: sampler;
+  [[binding(1), set(0)]] var<uniform_constant> myTexturePlane0: texture_sampled_2d<f32>;
+  [[binding(2), set(0)]] var<uniform_constant> mySamplerPlane1: sampler;
+  [[binding(3), set(0)]] var<uniform_constant> myTexturePlane1: texture_sampled_2d<f32>;
+  [[location(0)]] var<in> fragUV : vec2<f32>;
+  [[location(0)]] var<out> outColor : vec4<f32>;
+  [[stage(fragment)]]
+  fn main() -> void {
+    var plane0 : vec4<f32> = textureSample(myTexturePlane0, mySamplerPlane0, fragUV);
+    var plane1 : vec4<f32> = textureSample(myTexturePlane1, mySamplerPlane1, fragUV);
+    var interPixel : vec3<f32> = vec3<f32>(plane0[0], plane1[0], plane1[1]);
+
+    var factorOne : vec3<f32> = vec3<f32>(1.16438353, 1.16438353, 1.16438353);
+    var factorTow : vec3<f32> = vec3<f32>(-0.00000000228029018, -0.213248596, 2.11240172);
+    var factorThree: vec3<f32> = vec3<f32>(1.79274118, -0.532909274, -0.000000000596049432);
+
+    interPixel = vec3<f32>(factorOne * interPixel, factorTow * interPixel, factorThree * interPixel);
+    interPixel = vec3<f32>(-0.969429970, 0.300019622, -1.12926030) + interPixel;
+    outColor = vec4<f32>(interPixel, 1.0);
+    return;
+  }
+  `,
+  
+  };
+
 
 async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
   const adapter = await navigator.gpu.requestAdapter();
@@ -60,6 +78,7 @@ async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
   const context = canvas.getContext('gpupresent');
   let ready_frames = [];
   let stats = stat;
+  const useImport = (renderingMethod === 4);
 
   const swapChainFormat = "bgra8unorm";
 
@@ -88,13 +107,13 @@ async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
   const pipeline = device.createRenderPipeline({
     vertexStage: {
       module: device.createShaderModule({
-        code: wgslShaders.vertex,
+        code: useImport ? wgslImportShaders.vertex : wgslShaders.vertex,
       }),
       entryPoint: "main"
     },
     fragmentStage: {
       module: device.createShaderModule({
-        code: wgslShaders.fragment,
+        code: useImport ? wgslImportShaders.fragment : wgslShaders.fragment,
       }),
       entryPoint: "main"
     },
@@ -122,12 +141,20 @@ async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
     }],
   });
 
+  // This is the default sampler and the same as
+  // samplerPlane0.
   const sampler = device.createSampler({
     magFilter: "linear",
     minFilter: "linear",
   });
 
+  const samplerPlane1 = device.createSampler({
+    magFilter: "linear",
+    minFilter: "linear",
+  });
+
   let videoTexture = null;
+
   let uniformBindGroup = null; 
   
   async function renderFrameImageBitmap() {
@@ -136,7 +163,7 @@ async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
     }
     
     const frame = ready_frames.shift();
-    if (videoTexture === null) {
+    if (videoTexture === null && !useImport) {
       videoTexture = device.createTexture({
             size: {
               width: frame.codedWidth,
@@ -148,7 +175,7 @@ async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
         });
     }
 
-    if (uniformBindGroup === null) {
+    if (uniformBindGroup === null && !useImport) {
         uniformBindGroup = device.createBindGroup({
             layout: pipeline.getBindGroupLayout(0),
             entries: [{
@@ -162,40 +189,71 @@ async function requestWebGPUVideoFrameHandler(canvas, stat, renderingMethod) {
     }
 
     stats.begin();
-    const videoFrame = await frame.createImageBitmap();
-
+    let videoFrame;
+    let videoFramePlane0;
+    let videoFramePlane1;
+    if (useImport) {
+      videoFramePlane0 = device.defaultQueue.importVideoFrame(frame, 0);
+      videoFramePlane1 = device.defaultQueue.importVideoFrame(frame, 1);
+      uniformBindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{
+          binding: 0,
+          resource: sampler,
+        }, {
+          binding: 1,
+          resource: videoFramePlane0,
+        }, {
+          binding: 2,
+          resource: samplerPlane1,
+        }, {
+          binding: 3,
+          resource: videoFramePlane1,
+        }],
+      });
+    } else {
+      videoFrame = await frame.createImageBitmap();
       device.defaultQueue.copyImageBitmapToTexture(
         {imageBitmap:videoFrame, origin: {x:0, y: 0} },
         {texture: videoTexture},
         {width: frame.codedWidth, height:frame.codedHeight, depth: 1}
       );
+    }
 
-      const commandEncoder = device.createCommandEncoder();
-      const textureView = swapChain.getCurrentTexture().createView();
+    const commandEncoder = device.createCommandEncoder();
+    const textureView = swapChain.getCurrentTexture().createView();
 
-      const renderPassDescriptor = {
-        colorAttachments: [{
-          attachment: textureView,
-          loadValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
-        }],
-      };
+    const renderPassDescriptor = {
+      colorAttachments: [{
+        attachment: textureView,
+        loadValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+      }],
+    };
 
-      const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
-      passEncoder.setPipeline(pipeline);
-      passEncoder.setVertexBuffer(0, verticesBuffer);
-      passEncoder.setBindGroup(0, uniformBindGroup);
-      passEncoder.draw(6, 1, 0, 0);
-      passEncoder.endPass();
-      device.defaultQueue.submit([commandEncoder.finish()]);
-      
-      videoFrame.close();
-      frame.destroy();
-      stats.end();
+    const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
+    passEncoder.setPipeline(pipeline);
+    passEncoder.setVertexBuffer(0, verticesBuffer);
+    passEncoder.setBindGroup(0, uniformBindGroup);
+    passEncoder.draw(6, 1, 0, 0);
+    passEncoder.endPass();
+    device.defaultQueue.submit([commandEncoder.finish()]);
+    if (useImport) {
+      device.defaultQueue.releaseVideoFrame(frame);
+    }
+    if (!useImport) {
+        videoFrame.close();
+    }
+    frame.destroy();
+    stats.end();
   }
 
   function handleFrame(frame) {
     ready_frames.push(frame);
-    setTimeout(renderFrameImageBitmap, 0);
+    if (useImport) {
+        setTimeout(renderFrameImageBitmap, 0);
+    } else {
+        setTimeout(renderFrameImageBitmap, 0);
+    }
   }
   
   return handleFrame;

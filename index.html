@@ -27,7 +27,7 @@
 </head>
 
 <body>
-  <script src="https://mrdoob.github.io/stats.js/build/stats.min.js"></script>
+  <script src="stats.min.js"></script>
   <script
     src="webgl_webcodecs_video_frame.js"></script>
   <script
@@ -419,11 +419,15 @@
       var WebGPUTexImage = document.createElement("option");
       WebGPUTexImage.innerHTML = "WebGPU: CopyImageBitmapToTexture";
       WebGPUTexImage.setAttribute("value", "3");
+      var WebGPUImport = document.createElement("option");
+      WebGPUImport.innerHTML = "WebGPU: Import Video Frame(prototype)";
+      WebGPUImport.setAttribute("value", "4");
 
       renderingPath.appendChild(renderTo2DCanvas);
       renderingPath.appendChild(WebGLImporting);
       renderingPath.appendChild(WebGLTexImage);
       renderingPath.appendChild(WebGPUTexImage);
+      renderingPath.appendChild(WebGPUImport);
       renderingPath.setAttribute("value", "0");
 
       var renderingPathLabel = document.createElement("label");
